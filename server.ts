@@ -1,56 +1,20 @@
 import express from "express";
 import { fetchPagasaAlertsReal } from "./src/pagasa_adapter.js";
+import { fetchPhivolcsAlertsReal } from "./src/phivolcs_adapter.js";
 
 const app = express();
 
 const TYPHOON_SIGNAL_TRIGGER = 2;
 const EARTHQUAKE_MAGNITUDE_TRIGGER = 5.0;
 
-/**
- * STAGE 1 OF 2: hand-written mock data, same as the Firebase version --
- * proving the pipeline (Flutter app -> this server -> normalized JSON ->
- * back into SQLite) works before real PAGASA/PHIVOLCS scraping is wired in.
- */
-function fetchPagasaAlertsMock() {
-  return [
-    {
-      cycloneId: "TEST01",
-      bulletinNumber: 1,
-      cycloneName: "TestStorm",
-      category: "TS",
-      issuedAt: new Date().toISOString(),
-      expiresAt: null,
-      affectedAreas: [
-        { name: "Metro Manila", psgcCode: "1300000000", signalLevel: 2 },
-        { name: "Cavite", psgcCode: "0402100000", signalLevel: 1 },
-      ],
-      instructions: ["Stay indoors", "Monitor official updates"],
-    },
-  ];
-}
-
-function fetchPhivolcsAlertsMock() {
-  return [
-    {
-      dateTime: new Date().toISOString(),
-      latitude: 14.5995,
-      longitude: 120.9842,
-      depth: 10,
-      magnitude: 5.4,
-      location: "Manila Bay",
-    },
-  ];
-}
-
 // STAGE 2: PAGASA now uses the real parser (ported from bagyo-api).
-// PHIVOLCS is still mock -- that's the next task, not done here.
 async function fetchPagasaAlerts() {
   return fetchPagasaAlertsReal();
 }
 
-// TODO (stage 2): replace with real phivocs-api-derived scraper
+// STAGE 2: both PAGASA and PHIVOLCS now use real scrapers.
 async function fetchPhivolcsAlerts() {
-  return fetchPhivolcsAlertsMock();
+  return fetchPhivolcsAlertsReal();
 }
 
 function normalizePagasa(raw) {
@@ -125,7 +89,7 @@ app.get("/getAlerts", async (req, res) => {
       ...phivolcsRaw.map(normalizePhivolcs),
     ];
 
-    console.log(`getAlerts returning ${alerts.length} alerts (mock data, stage 1)`);
+    console.log(`getAlerts returning ${alerts.length} alerts (real data)`);
     res.status(200).json(alerts);
   } catch (err) {
     console.error("getAlerts failed:", err);
