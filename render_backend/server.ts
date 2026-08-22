@@ -1,4 +1,6 @@
-const express = require("express");
+import express from "express";
+import { fetchPagasaAlertsReal } from "./src/pagasa_adapter.js";
+
 const app = express();
 
 const TYPHOON_SIGNAL_TRIGGER = 2;
@@ -40,9 +42,10 @@ function fetchPhivolcsAlertsMock() {
   ];
 }
 
-// TODO (stage 2): replace with real bagyo-api-derived scraper
+// STAGE 2: PAGASA now uses the real parser (ported from bagyo-api).
+// PHIVOLCS is still mock -- that's the next task, not done here.
 async function fetchPagasaAlerts() {
-  return fetchPagasaAlertsMock();
+  return fetchPagasaAlertsReal();
 }
 
 // TODO (stage 2): replace with real phivocs-api-derived scraper
