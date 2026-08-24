@@ -10,12 +10,16 @@
  * psgc_h3_mapping.json in the same directory or adjust MAPPING_PATH below.
  */
 
+import { fileURLToPath } from 'url';
+import { dirname } from 'path';
 import fs from "fs";
 import path from "path";
 import * as h3 from "h3-js";
 
-const MAPPING_PATH = path.join(__dirname, "psgc_h3_mapping.json");
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
+const MAPPING_PATH = path.join(__dirname, "psgc_h3_mapping.json");
 interface AdminAreaEntry {
   name: string | null;
   centroid_h3: string | null;
