@@ -7,10 +7,11 @@
     "start": "tsx server.ts"
   },
   "dependencies": {
-    "express": "^4.19.2",
     "axios": "^1.7.2",
     "cheerio": "^1.0.0",
-    "zod": "*",
-    "tsx": "*"
+    "express": "^4.19.2",
+    "h3-js": "^4.5.0",
+    "tsx": "*",
+    "zod": "*"
   }
 }
