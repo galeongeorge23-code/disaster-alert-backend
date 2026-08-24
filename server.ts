@@ -1,6 +1,7 @@
 import express from "express";
 import { fetchPagasaAlertsReal } from "./src/pagasa_adapter.js";
 import { fetchPhivolcsAlertsReal } from "./src/phivolcs_adapter.js";
+import { resolvePsgcToH3, resolveLatLngToH3 } from "./src/h3_lookup.js";
 
 const app = express();
 
@@ -21,7 +22,10 @@ function normalizePagasa(raw) {
   const areas = raw.affectedAreas.map((a) => ({
     area_name: a.name,
     psgc_code: a.psgcCode,
-    h3_index: `PLACEHOLDER_${a.psgcCode}`, // real PSGC->H3 mapping comes later
+    h3_index: (() => {
+     const { h3_cells } = resolvePsgcToH3(a.psgcCode);
+     return h3_cells;
+      })(),
     signal_level: a.signalLevel,
     peis: null,
   }));
@@ -66,7 +70,7 @@ function normalizePhivolcs(raw) {
       {
         area_name: raw.location,
         psgc_code: null,
-        h3_index: `PLACEHOLDER_${raw.latitude}_${raw.longitude}`,
+        h3_index: [resolveLatLngToH3(raw.latitude, raw.longitude)],
         signal_level: null,
         peis: null,
       },
