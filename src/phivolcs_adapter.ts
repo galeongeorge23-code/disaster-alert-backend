@@ -35,6 +35,10 @@ interface RawPhivolcsRow {
  */
 export async function fetchPhivolcsAlertsReal(): Promise<RawPhivolcsRow[]> {
   const html = await fetchHtml();
+  
+  console.log('PHIVOLCS HTML length:', html.length);
+  console.log('PHIVOLCS HTML preview:', html.substring(0, 1000));
+  
   const $ = cheerio.load(html);
   const $table = $('table.MsoNormalTable');
 
