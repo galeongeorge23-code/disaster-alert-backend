@@ -1,5 +1,6 @@
 import * as cheerio from 'cheerio';
 import https from 'https';
+import { createGunzip } from 'zlib';
 
 const PHIVOLCS_URL = 'https://earthquake.phivolcs.dost.gov.ph/';
 
@@ -73,36 +74,39 @@ function fetchHtml(): Promise<string> {
       {
         headers: {
           'User-Agent': 'DisasterAlertApp-SchoolResearchProject/0.1',
+          'Accept-Encoding': 'gzip, deflate',
         },
         rejectUnauthorized: false,
         timeout: 30_000,
       },
       (res: import('http').IncomingMessage) => {
         if (res.statusCode && res.statusCode >= 400) {
-          reject(
-            new Error(
-              `PHIVOLCS fetch failed: HTTP ${res.statusCode}`,
-            ),
-          );
+          reject(new Error(`PHIVOLCS fetch failed: HTTP ${res.statusCode}`));
           return;
         }
 
         let data = '';
+        let stream: NodeJS.ReadableStream = res;
 
-        res.on('data', (chunk: Buffer) => {
+        // If response is gzipped, decompress it
+        if (res.headers['content-encoding'] === 'gzip') {
+          console.log('Response is gzip-encoded, decompressing...');
+          stream = res.pipe(createGunzip());
+        }
+
+        stream.on('data', (chunk: Buffer) => {
           data += chunk.toString();
         });
 
-        res.on('end', () => {
+        stream.on('end', () => {
           resolve(data);
         });
 
-        res.on('error', reject);
+        stream.on('error', reject);
       },
     );
 
     req.on('error', reject);
-
     req.on('timeout', () => {
       req.destroy(new Error('PHIVOLCS fetch timed out'));
     });
