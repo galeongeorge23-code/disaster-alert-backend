@@ -17,53 +17,104 @@ export async function fetchPhivolcsAlertsReal(): Promise<RawPhivolcsRow[]> {
   try {
     const html = await fetchHtml();
     console.log('PHIVOLCS HTML length:', html.length);
-    console.log('PHIVOLCS HTML first 1000 chars:');
-    console.log(html.substring(0, 1000));
 
     const $ = cheerio.load(html);
-    
-    // Try to find ANY table
-    const allTables = $('table');
-    console.log(`Found ${allTables.length} total tables on page`);
-    
-    allTables.each((i, table) => {
+
+    // Find all MsoNormalTable tables
+    const allTables = $('table.MsoNormalTable');
+    console.log(`Found ${allTables.length} MsoNormalTable tables on page`);
+
+    // The earthquake data table is the one with 1000+ rows
+    let $table: any = null;
+    allTables.each((i: number, table: any) => {
       const $t = $(table);
-      const classes = $t.attr('class');
-      const id = $t.attr('id');
       const rows = $t.find('tr').length;
-      console.log(`Table ${i}: class="${classes}" id="${id}" rows=${rows}`);
+      console.log(`Table ${i}: ${rows} rows`);
+
+      if (rows > 100 && !$table) {
+        console.log(`Using table ${i} with ${rows} rows`);
+        $table = $t;
+      }
     });
 
-    let $table = $('table.MsoNormalTable');
-    if ($table.length === 0) {
-      console.log('MsoNormalTable not found, using first table...');
-      $table = $('table').first();
+    if (!$table || $table.length === 0) {
+      throw new Error('Could not find earthquake data table (1000+ rows)');
     }
 
-    if ($table.length === 0) {
-      throw new Error('No tables found on PHIVOLCS page');
+    const rows: RawPhivolcsRow[] = [];
+    let headerSkipped = false;
+
+    $table.find('tr').each((_: number, row: any) => {
+      const $row = $(row);
+      const $cols = $row.find('td');
+
+      if ($cols.length < 6) return;
+
+      // Skip header row
+      if (!headerSkipped && $row.text().includes('enter new event')) {
+        headerSkipped = true;
+        return;
+      }
+
+      const getText = (index: number): string => {
+        const $col = $cols.eq(index);
+        const $spans = $col.find('span');
+        if ($spans.length > 0) {
+          return $spans
+            .map((_, s: any) => $(s).text().trim())
+            .get()
+            .join(' ')
+            .trim();
+        }
+        return $col.text().trim();
+      };
+
+      const rawDateTime = getText(0);
+      const latStr = getText(1);
+      const lngStr = getText(2);
+      const depthStr = getText(3);
+      const magStr = getText(4);
+      const location = getText(5).replace(/\s+/g, ' ');
+
+      const latitude = parseFloat(latStr);
+      const longitude = parseFloat(lngStr);
+      const depth = parseFloat(depthStr);
+      const magnitude = parseFloat(magStr);
+
+      if (!rawDateTime || !location || Number.isNaN(magnitude)) {
+        return;
+      }
+
+      rows.push({
+        dateTime: parsePhivolcsDateTime(rawDateTime),
+        latitude: Number.isNaN(latitude) ? 0 : latitude,
+        longitude: Number.isNaN(longitude) ? 0 : longitude,
+        depth: Number.isNaN(depth) ? 0 : depth,
+        magnitude,
+        location,
+      });
+    });
+
+    if (rows.length === 0) {
+      throw new Error('Parsed earthquake table but found zero rows');
     }
 
-    // ... rest of parsing ...
-
-    return [];
+    console.log(`PHIVOLCS: Parsed ${rows.length} earthquakes`);
+    return rows;
   } catch (error) {
-    console.error('Error fetching PHIVOLCS alerts:', error);
-    return [];
+    console.error('PHIVOLCS parsing failed:', error);
+    throw error;
   }
 }
 
 function parsePhivolcsDateTime(raw: string): string {
   const parsed = new Date(raw.replace(' - ', ' '));
-
   if (!Number.isNaN(parsed.getTime())) {
     return parsed.toISOString();
   }
-
   console.warn(
     `PHIVOLCS date "${raw}" did not parse cleanly -- using fetch time as fallback`,
   );
-
   return new Date().toISOString();
 }
 
@@ -79,14 +130,14 @@ function fetchHtml(): Promise<string> {
         rejectUnauthorized: false,
         timeout: 30_000,
       },
-      (res: import('http').IncomingMessage) => {
+      (res: any) => {
         if (res.statusCode && res.statusCode >= 400) {
           reject(new Error(`PHIVOLCS fetch failed: HTTP ${res.statusCode}`));
           return;
         }
 
         let data = '';
-        let stream: NodeJS.ReadableStream = res;
+        let stream: any = res;
 
         // If response is gzipped, decompress it
         if (res.headers['content-encoding'] === 'gzip') {
