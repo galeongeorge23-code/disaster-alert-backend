@@ -1,69 +1,65 @@
-import * as cheerio from 'cheerio';
-import https from 'https';
-
-const PHIVOLCS_URL = 'https://earthquake.phivolcs.dost.gov.ph/';
-
-interface RawPhivolcsRow {
-  dateTime: string;
-  latitude: number;
-  longitude: number;
-  depth: number;
-  magnitude: number;
-  location: string;
-}
-
-/**
- * Real PHIVOLCS fetch + parse, ported from phivocs-api's fetchEarthquakes.
- * Confirmed against the live page structure during Phase 1: the main
- * catalog table only has date/time, coordinates, depth, origin, magnitude,
- * location -- no intensity data anywhere (see Phase 1 write-up). This
- * scraper only ever needs magnitude, matching the corrected trigger design.
- *
- * SECURITY NOTE, stated plainly rather than buried: this disables TLS
- * certificate verification (rejectUnauthorized: false) for this one host,
- * carried over directly from phivocs-api's original code. That project's
- * author apparently found the fetch fails without it -- likely a
- * certificate configuration issue on PHIVOLCS's server, not something in
- * our control. This is a real trade-off (it means we can't detect a
- * man-in-the-middle attack on this specific request) worth naming
- * explicitly in the paper's methodology/limitations, not quietly inheriting.
- *
- * UNVERIFIED DETAIL: PHIVOLCS's exact date/time text format wasn't
- * directly confirmed during this port. parsePhivolcsDateTime attempts a
- * real parse and falls back to the fetch time (logging a warning) if it
- * fails -- check server logs after first deploy to see which path fired.
- */
 export async function fetchPhivolcsAlertsReal(): Promise<RawPhivolcsRow[]> {
   const html = await fetchHtml();
-  
   console.log('PHIVOLCS HTML length:', html.length);
-  console.log('PHIVOLCS HTML preview:', html.substring(0, 1000));
-  
+
   const $ = cheerio.load(html);
   const $table = $('table.MsoNormalTable');
 
   if ($table.length === 0) {
-    throw new Error('PHIVOLCS earthquake table not found on page (selector may be stale)');
+    throw new Error(
+      'PHIVOLCS earthquake table not found on page (selector may be stale)',
+    );
   }
 
   const rows: RawPhivolcsRow[] = [];
+  let headerSkipped = false;
 
   $table.find('tr').each((_, row) => {
     const $row = $(row);
     const $cols = $row.find('td');
+
     if ($cols.length < 6) return;
 
-    const $dateLink = $cols.eq(0).find('a');
-    const rawDateTime = $dateLink.length ? $dateLink.text().trim() : $cols.eq(0).text().trim();
-    if (!rawDateTime) return;
+    // Skip header row (contains "enter new event below" comment)
+    if (!headerSkipped && $row.text().includes('enter new event')) {
+      headerSkipped = true;
+      return;
+    }
 
-    const latitude = parseFloat($cols.eq(1).text().trim());
-    const longitude = parseFloat($cols.eq(2).text().trim());
-    const depth = parseFloat($cols.eq(3).text().trim());
-    const magnitude = parseFloat($cols.eq(4).text().trim());
-    const location = $cols.eq(5).text().replace(/\s+/g, ' ').trim();
+    // Extract text from td, but check nested spans first
+    const getText = (index: number): string => {
+      const $col = $cols.eq(index);
+      // First try to get text from nested spans (new HTML structure)
+      const $spans = $col.find('span');
+      if ($spans.length > 0) {
+        return $spans
+          .map((_, s) => $(s).text().trim())
+          .get()
+          .join(' ')
+          .trim();
+      }
+      // Fallback to direct text (old HTML structure)
+      return $col.text().trim();
+    };
 
-    if (!location || Number.isNaN(magnitude)) return;
+    const rawDateTime = getText(0);
+    const latStr = getText(1);
+    const lngStr = getText(2);
+    const depthStr = getText(3);
+    const magStr = getText(4);
+    const location = getText(5).replace(/\s+/g, ' ');
+
+    // Parse numbers
+    const latitude = parseFloat(latStr);
+    const longitude = parseFloat(lngStr);
+    const depth = parseFloat(depthStr);
+    const magnitude = parseFloat(magStr);
+
+    // Skip invalid rows
+    if (!rawDateTime || !location || Number.isNaN(magnitude)) {
+      console.debug(`Skipping row: date="${rawDateTime}" mag="${magStr}" loc="${location}"`);
+      return;
+    }
 
     rows.push({
       dateTime: parsePhivolcsDateTime(rawDateTime),
@@ -76,42 +72,11 @@ export async function fetchPhivolcsAlertsReal(): Promise<RawPhivolcsRow[]> {
   });
 
   if (rows.length === 0) {
-    throw new Error('PHIVOLCS table found but zero rows parsed -- selector or column order may have changed');
-  }
-
-  return rows;
-}
-
-function parsePhivolcsDateTime(raw: string): string {
-  const parsed = new Date(raw.replace(' - ', ' '));
-  if (!Number.isNaN(parsed.getTime())) {
-    return parsed.toISOString();
-  }
-  console.warn(`PHIVOLCS date "${raw}" did not parse cleanly -- using fetch time as fallback`);
-  return new Date().toISOString();
-}
-
-function fetchHtml(): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const req = https.get(
-      PHIVOLCS_URL,
-      {
-        headers: { 'User-Agent': 'DisasterAlertApp-SchoolResearchProject/0.1' },
-        rejectUnauthorized: false,
-        timeout: 30_000,
-      },
-      (res) => {
-        if (res.statusCode && res.statusCode >= 400) {
-          reject(new Error(`PHIVOLCS fetch failed: HTTP ${res.statusCode}`));
-          return;
-        }
-        let data = '';
-        res.on('data', (chunk) => (data += chunk));
-        res.on('end', () => resolve(data));
-        res.on('error', reject);
-      },
+    throw new Error(
+      'PHIVOLCS table found but zero rows parsed -- HTML structure may have changed',
     );
-    req.on('error', reject);
-    req.on('timeout', () => req.destroy(new Error('PHIVOLCS fetch timed out')));
-  });
+  }
+
+  console.log(`PHIVOLCS: Parsed ${rows.length} earthquakes`);
+  return rows;
 }
