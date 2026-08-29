@@ -124,7 +124,7 @@ function fetchHtml(): Promise<string> {
       PHIVOLCS_URL,
       {
         headers: {
-          'User-Agent': 'DisasterAlertApp-SchoolResearchProject/0.1',
+          'User-Agent': 'ASPER-Alert/1.0 (SchoolResearchProject)',
           'Accept-Encoding': 'gzip, deflate',
         },
         rejectUnauthorized: false,
