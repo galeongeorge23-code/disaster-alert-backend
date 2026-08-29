@@ -1,3 +1,17 @@
+import * as cheerio from 'cheerio';
+import https from 'https';
+
+const PHIVOLCS_URL = 'https://earthquake.phivolcs.dost.gov.ph/';
+
+interface RawPhivolcsRow {
+  dateTime: string;
+  latitude: number;
+  longitude: number;
+  depth: number;
+  magnitude: number;
+  location: string;
+}
+
 export async function fetchPhivolcsAlertsReal(): Promise<RawPhivolcsRow[]> {
   const html = await fetchHtml();
   console.log('PHIVOLCS HTML length:', html.length);
@@ -79,4 +93,61 @@ export async function fetchPhivolcsAlertsReal(): Promise<RawPhivolcsRow[]> {
 
   console.log(`PHIVOLCS: Parsed ${rows.length} earthquakes`);
   return rows;
+}
+
+function parsePhivolcsDateTime(raw: string): string {
+  const parsed = new Date(raw.replace(' - ', ' '));
+
+  if (!Number.isNaN(parsed.getTime())) {
+    return parsed.toISOString();
+  }
+
+  console.warn(
+    `PHIVOLCS date "${raw}" did not parse cleanly -- using fetch time as fallback`,
+  );
+
+  return new Date().toISOString();
+}
+
+function fetchHtml(): Promise<string> {
+  return new Promise<string>((resolve, reject) => {
+    const req = https.get(
+      PHIVOLCS_URL,
+      {
+        headers: {
+          'User-Agent': 'DisasterAlertApp-SchoolResearchProject/0.1',
+        },
+        rejectUnauthorized: false,
+        timeout: 30_000,
+      },
+      (res: import('http').IncomingMessage) => {
+        if (res.statusCode && res.statusCode >= 400) {
+          reject(
+            new Error(
+              `PHIVOLCS fetch failed: HTTP ${res.statusCode}`,
+            ),
+          );
+          return;
+        }
+
+        let data = '';
+
+        res.on('data', (chunk: Buffer) => {
+          data += chunk.toString();
+        });
+
+        res.on('end', () => {
+          resolve(data);
+        });
+
+        res.on('error', reject);
+      },
+    );
+
+    req.on('error', reject);
+
+    req.on('timeout', () => {
+      req.destroy(new Error('PHIVOLCS fetch timed out'));
+    });
+  });
 }
