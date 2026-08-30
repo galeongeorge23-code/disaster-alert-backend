@@ -1,15 +1,17 @@
-export async function fetchPagasaAlertsReal(): Promise
-  Array<{
-    cycloneId: string;
-    bulletinNumber: number;
-    cycloneName: string;
-    category: string;
-    issuedAt: string;
-    expiresAt: string | null;
-    affectedAreas: Array<{ name: string; psgcCode: string | null; signalLevel: number }>;
-    instructions: string[];
-  }>
-> {
+interface PagasaBulletin {
+  cycloneId: string;
+  bulletinNumber: number;
+  cycloneName: string;
+  category: string;
+  issuedAt: string;
+  expiresAt: string | null;
+  affectedAreas: Array<{ name: string; psgcCode: string | null; signalLevel: number }>;
+  instructions: string[];
+}
+
+const PAGASA_BULLETIN_URL = 'https://www.pagasa.dost.gov.ph/tropical-cyclone/severe-weather-bulletin';
+
+export async function fetchPagasaAlertsReal(): Promise<PagasaBulletin[]> {
   try {
     const response = await fetch(PAGASA_BULLETIN_URL, {
       headers: {
@@ -24,14 +26,12 @@ export async function fetchPagasaAlertsReal(): Promise
 
     const html = await response.text();
 
-    // Check for "No Active Tropical Cyclone"
     if (/No Active Tropical Cyclone/i.test(html)) {
       console.log('PAGASA: No active tropical cyclone on website');
       console.log('Using PAGASA fallback data for demo...');
-      return getPagasaFallbackData();  // ← Return fallback instead of []
+      return getPagasaFallbackData();
     }
 
-    // Real parsing would go here (requires Puppeteer for JS rendering)
     throw new Error('PAGASA page requires JS rendering');
   } catch (error) {
     console.warn('PAGASA fetch/parse failed:', error);
@@ -40,7 +40,7 @@ export async function fetchPagasaAlertsReal(): Promise
   }
 }
 
-function getPagasaFallbackData() {
+function getPagasaFallbackData(): PagasaBulletin[] {
   const now = new Date();
   const issuedAt = new Date(now.getTime() - 2 * 60 * 60000);
 
