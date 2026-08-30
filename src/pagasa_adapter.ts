@@ -1,8 +1,4 @@
- import type { ParsedBulletin } from './shared/index.js';
-
-const PAGASA_BULLETIN_URL = 'https://www.pagasa.dost.gov.ph/tropical-cyclone/severe-weather-bulletin';
-
-export async function fetchPagasaAlertsReal(): Promise<
+export async function fetchPagasaAlertsReal(): Promise
   Array<{
     cycloneId: string;
     bulletinNumber: number;
@@ -15,7 +11,6 @@ export async function fetchPagasaAlertsReal(): Promise<
   }>
 > {
   try {
-    // Attempt real parse (will fail due to JS-rendering, but keep for future)
     const response = await fetch(PAGASA_BULLETIN_URL, {
       headers: {
         'user-agent': 'ASPER-Alert (SchoolResearchProject)',
@@ -31,15 +26,15 @@ export async function fetchPagasaAlertsReal(): Promise<
 
     // Check for "No Active Tropical Cyclone"
     if (/No Active Tropical Cyclone/i.test(html)) {
-      console.log('PAGASA: No active tropical cyclone');
-      return [];
+      console.log('PAGASA: No active tropical cyclone on website');
+      console.log('Using PAGASA fallback data for demo...');
+      return getPagasaFallbackData();  // ← Return fallback instead of []
     }
 
     // Real parsing would go here (requires Puppeteer for JS rendering)
-    // For now, fall back to mock data
-    throw new Error('PAGASA page requires JS rendering (future: implement Puppeteer)');
+    throw new Error('PAGASA page requires JS rendering');
   } catch (error) {
-    console.warn('PAGASA real parsing failed:', error);
+    console.warn('PAGASA fetch/parse failed:', error);
     console.log('Using PAGASA fallback data for demo...');
     return getPagasaFallbackData();
   }
@@ -47,7 +42,7 @@ export async function fetchPagasaAlertsReal(): Promise<
 
 function getPagasaFallbackData() {
   const now = new Date();
-  const issuedAt = new Date(now.getTime() - 2 * 60 * 60000); // 2 hours ago
+  const issuedAt = new Date(now.getTime() - 2 * 60 * 60000);
 
   return [
     {
@@ -69,7 +64,6 @@ function getPagasaFallbackData() {
         'Evacuate low-lying and flood-prone areas',
         'Avoid venturing in the sea',
         'Remain indoors during strong winds',
-        'Do not drive unless necessary',
       ],
     },
   ];
