@@ -54,11 +54,11 @@ function getPagasaFallbackData(): PagasaBulletin[] {
       expiresAt: null,
       affectedAreas: [
         { name: 'Metro Manila', psgcCode: '130000000', signalLevel: 3 },
-        { name: 'Cavite', psgcCode: '042300000', signalLevel: 3 },
-        { name: 'Laguna', psgcCode: '042400000', signalLevel: 3 },
-        { name: 'Batangas', psgcCode: '041700000', signalLevel: 2 },
-        { name: 'Rizal', psgcCode: '074400000', signalLevel: 3 },
-        { name: 'Quezon', psgcCode: '062600000', signalLevel: 1 },
+        { name: 'Cavite', psgcCode: '402100000', signalLevel: 3 },
+        { name: 'Laguna', psgcCode: '403400000', signalLevel: 3 },
+        { name: 'Batangas', psgcCode: '401000000', signalLevel: 2 },
+        { name: 'Rizal', psgcCode: '405800000', signalLevel: 3 },
+        { name: 'Quezon', psgcCode: '405600000', signalLevel: 1 },
       ],
       instructions: [
         'Evacuate low-lying and flood-prone areas',
