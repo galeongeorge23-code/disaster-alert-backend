@@ -13,5 +13,8 @@
     "h3-js": "^4.5.0",
     "tsx": "*",
     "zod": "*"
+  },
+  "devDependencies": {
+    "@types/node": "^26.4.0"
   }
 }
