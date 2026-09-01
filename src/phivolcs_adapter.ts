@@ -108,13 +108,30 @@ export async function fetchPhivolcsAlertsReal(): Promise<RawPhivolcsRow[]> {
 }
 
 function parsePhivolcsDateTime(raw: string): string {
-  const parsed = new Date(raw.replace(' - ', ' '));
-  if (!Number.isNaN(parsed.getTime())) {
-    return parsed.toISOString();
-  }
-  console.warn(
-    `PHIVOLCS date "${raw}" did not parse cleanly -- using fetch time as fallback`,
+  // PHIVOLCS may duplicate the date/time text:
+  // "01 August 2026 - 01:22 AM 01 August 2026 - 01:22 AM"
+  const cleaned = raw.trim();
+
+  // Extract the first complete PHIVOLCS date/time occurrence.
+  const match = cleaned.match(
+    /(\d{1,2}\s+[A-Za-z]+\s+\d{4})\s*-\s*(\d{1,2}:\d{2}\s*[AP]M)/i
   );
+
+  if (match) {
+    const datePart = match[1];
+    const timePart = match[2];
+
+    const parsed = new Date(`${datePart} ${timePart}`);
+
+    if (!Number.isNaN(parsed.getTime())) {
+      return parsed.toISOString();
+    }
+  }
+
+  console.warn(
+    `PHIVOLCS date "${raw}" could not be parsed -- using fetch time as fallback`,
+  );
+
   return new Date().toISOString();
 }
 

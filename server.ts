@@ -1,22 +1,18 @@
 import express from "express";
 import { fetchPagasaAlertsReal } from "./src/pagasa_adapter.js";
 import { fetchPhivolcsAlertsReal } from "./src/phivolcs_adapter.js";
-import { resolvePsgcToH3, resolveLatLngToH3 } from "./src/h3_lookup.js";
 
 const app = express();
 
 const TYPHOON_SIGNAL_TRIGGER = 2;
 const EARTHQUAKE_MAGNITUDE_TRIGGER = 5.0;
 
-const DEFAULT_PAGE_SIZE = 50;
-const SOURCE_BATCH_SIZE = 10;
-
-// PAGASA now uses the real parser.
+// STAGE 2: PAGASA now uses the real parser (ported from bagyo-api).
 async function fetchPagasaAlerts() {
   return fetchPagasaAlertsReal();
 }
 
-// PHIVOLCS uses the real scraper.
+// STAGE 2: both PAGASA and PHIVOLCS now use real scrapers.
 async function fetchPhivolcsAlerts() {
   return fetchPhivolcsAlertsReal();
 }
@@ -25,17 +21,7 @@ function normalizePagasa(raw) {
   const areas = raw.affectedAreas.map((a) => ({
     area_name: a.name,
     psgc_code: a.psgcCode,
-    h3_index: (() => {
-      const result = resolvePsgcToH3(a.psgcCode);
-
-      console.log(
-        `[PAGASA H3] ${a.name} | PSGC: ${a.psgcCode} | ` +
-        `Level: ${result.matchedLevel} | ` +
-        `H3 cells: ${result.h3_cells.length}`
-      );
-
-      return result.h3_cells;
-    })(),
+    h3_index: `PLACEHOLDER_${a.psgcCode}`, // real PSGC->H3 mapping comes later
     signal_level: a.signalLevel,
     peis: null,
   }));
@@ -50,15 +36,11 @@ function normalizePagasa(raw) {
       typhoon: {
         cyclone_name: raw.cycloneName,
         category: raw.category,
-        max_signal_in_bulletin: Math.max(
-          ...areas.map((a) => a.signal_level ?? 0)
-        ),
+        max_signal_in_bulletin: Math.max(...areas.map((a) => a.signal_level ?? 0)),
       },
     },
     areas,
-    alert_level: areas.some(
-      (a) => (a.signal_level ?? 0) >= TYPHOON_SIGNAL_TRIGGER
-    )
+    alert_level: areas.some((a) => (a.signal_level ?? 0) >= TYPHOON_SIGNAL_TRIGGER)
       ? "active_caching"
       : "surveillance",
     instructions: raw.instructions ?? [],
@@ -84,107 +66,82 @@ function normalizePhivolcs(raw) {
       {
         area_name: raw.location,
         psgc_code: null,
-        h3_index: [resolveLatLngToH3(raw.latitude, raw.longitude)],
+        h3_index: `PLACEHOLDER_${raw.latitude}_${raw.longitude}`,
         signal_level: null,
         peis: null,
       },
     ],
-    alert_level:
-      raw.magnitude >= EARTHQUAKE_MAGNITUDE_TRIGGER
-        ? "active_caching"
-        : "surveillance",
+    alert_level: raw.magnitude >= EARTHQUAKE_MAGNITUDE_TRIGGER ? "active_caching" : "surveillance",
     instructions: [],
     raw_payload: JSON.stringify(raw),
   };
 }
 
 /**
- * Builds a balanced alert page.
+ * Returns a source-balanced page of alerts.
  *
- * Each round attempts to take:
+ * Alerts are taken in rounds of up to 10:
  *   - up to 10 PAGASA alerts
  *   - up to 10 PHIVOLCS alerts
  *
- * This continues until the requested page size is reached.
- *
- * If one source runs out of alerts, the remaining slots are filled
- * from the other source.
+ * If one source runs out of alerts, the other source fills
+ * the remaining slots.
  */
-function buildBalancedPage(pagasaAlerts, phivolcsAlerts, page, limit) {
-  const pagasaStart = page * Math.ceil(limit / 2);
-  const phivolcsStart = page * Math.ceil(limit / 2);
+function getBalancedPage(
+  pagasaAlerts,
+  phivolcsAlerts,
+  page,
+  limit
+) {
+  const PAGASA_BATCH_SIZE = 10;
+  const PHIVOLCS_BATCH_SIZE = 10;
 
-  let pagasaIndex = pagasaStart;
-  let phivolcsIndex = phivolcsStart;
+  const startOffset = (page - 1) * limit;
 
-  const result = [];
+  // Build the complete balanced sequence first.
+  const balanced = [];
 
-  while (result.length < limit) {
-    let addedThisRound = false;
+  let pagasaIndex = 0;
+  let phivolcsIndex = 0;
 
+  while (
+    pagasaIndex < pagasaAlerts.length ||
+    phivolcsIndex < phivolcsAlerts.length
+  ) {
     // Take up to 10 PAGASA alerts.
-    for (
-      let i = 0;
-      i < SOURCE_BATCH_SIZE && result.length < limit;
-      i++
-    ) {
-      if (pagasaIndex < pagasaAlerts.length) {
-        result.push(pagasaAlerts[pagasaIndex]);
-        pagasaIndex++;
-        addedThisRound = true;
-      } else {
-        break;
-      }
+    for (let i = 0; i < PAGASA_BATCH_SIZE; i++) {
+      if (pagasaIndex >= pagasaAlerts.length) break;
+
+      balanced.push(pagasaAlerts[pagasaIndex]);
+      pagasaIndex++;
     }
 
     // Take up to 10 PHIVOLCS alerts.
-    for (
-      let i = 0;
-      i < SOURCE_BATCH_SIZE && result.length < limit;
-      i++
-    ) {
-      if (phivolcsIndex < phivolcsAlerts.length) {
-        result.push(phivolcsAlerts[phivolcsIndex]);
-        phivolcsIndex++;
-        addedThisRound = true;
-      } else {
-        break;
-      }
-    }
+    for (let i = 0; i < PHIVOLCS_BATCH_SIZE; i++) {
+      if (phivolcsIndex >= phivolcsAlerts.length) break;
 
-    // Both sources have been exhausted.
-    if (!addedThisRound) {
-      break;
+      balanced.push(phivolcsAlerts[phivolcsIndex]);
+      phivolcsIndex++;
     }
   }
 
-  return result;
+  return balanced.slice(startOffset, startOffset + limit);
 }
 
 app.get("/getAlerts", async (req, res) => {
   try {
-    const page = Math.max(
+    const offset = Math.max(
       0,
-      Number.parseInt(String(req.query.page ?? "0"), 10) || 0
+      Number.parseInt(String(req.query.offset ?? "0"), 10) || 0
     );
 
-    const limit = Math.min(
-      100,
-      Math.max(
-        1,
-        Number.parseInt(
-          String(req.query.limit ?? DEFAULT_PAGE_SIZE),
-          10
-        ) || DEFAULT_PAGE_SIZE
-      )
-    );
+    const limit = 50;
 
     const [pagasaRaw, phivolcsRaw] = await Promise.all([
       fetchPagasaAlerts(),
       fetchPhivolcsAlerts(),
     ]);
 
-    // Normalize each source separately.
     const pagasaAlerts = pagasaRaw
       .map(normalizePagasa)
       .sort(
@@ -201,41 +158,53 @@ app.get("/getAlerts", async (req, res) => {
           new Date(a.issued_at).getTime()
       );
 
-    const alerts = buildBalancedPage(
-      pagasaAlerts,
-      phivolcsAlerts,
-      page,
-      limit
-    );
+    // Build a balanced stream:
+    // 10 PAGASA, then 10 PHIVOLCS, repeatedly.
+    const balancedAlerts = [];
 
-    const hasMore =
-      (page + 1) * Math.ceil(limit / 2) < pagasaAlerts.length ||
-      (page + 1) * Math.ceil(limit / 2) < phivolcsAlerts.length;
+    let pagasaIndex = 0;
+    let phivolcsIndex = 0;
+
+    while (
+      balancedAlerts.length < offset + limit &&
+      (pagasaIndex < pagasaAlerts.length ||
+        phivolcsIndex < phivolcsAlerts.length)
+    ) {
+      // Take up to 10 PAGASA alerts.
+      for (
+        let i = 0;
+        i < 10 && pagasaIndex < pagasaAlerts.length;
+        i++
+      ) {
+        balancedAlerts.push(pagasaAlerts[pagasaIndex++]);
+      }
+
+      // Take up to 10 PHIVOLCS alerts.
+      for (
+        let i = 0;
+        i < 10 && phivolcsIndex < phivolcsAlerts.length;
+        i++
+      ) {
+        balancedAlerts.push(phivolcsAlerts[phivolcsIndex++]);
+      }
+    }
+
+    const alerts = balancedAlerts.slice(offset, offset + limit);
 
     console.log(
-      `getAlerts page=${page}, limit=${limit}: ` +
-      `${alerts.length} alerts ` +
-      `(PAGASA available: ${pagasaAlerts.length}, ` +
-      `PHIVOLCS available: ${phivolcsAlerts.length}, ` +
-      `hasMore: ${hasMore})`
+      `getAlerts offset=${offset} returning ${alerts.length} alerts`
     );
 
-    res.status(200).json({
-      alerts,
-      page,
-      limit,
-      has_more: hasMore,
-      total_returned: alerts.length,
-    });
+    res.status(200).json(alerts);
   } catch (err) {
     console.error("getAlerts failed:", err);
     res.status(500).json({ error: err.message });
   }
 });
 
-// Render/free hosts provide PORT through the environment.
+// Render (and most free hosts) inject the port to listen on via env var --
+// don't hardcode 3000, or the deployed server won't be reachable.
 const PORT = process.env.PORT || 3000;
-
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
