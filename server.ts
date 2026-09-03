@@ -77,19 +77,124 @@ function normalizePhivolcs(raw) {
   };
 }
 
+/**
+ * Returns a source-balanced page of alerts.
+ *
+ * Alerts are taken in rounds of up to 10:
+ *   - up to 10 PAGASA alerts
+ *   - up to 10 PHIVOLCS alerts
+ *
+ * If one source runs out of alerts, the other source fills
+ * the remaining slots.
+ */
+function getBalancedPage(
+  pagasaAlerts,
+  phivolcsAlerts,
+  page,
+  limit
+) {
+  const PAGASA_BATCH_SIZE = 10;
+  const PHIVOLCS_BATCH_SIZE = 10;
+
+  const startOffset = (page - 1) * limit;
+
+  // Build the complete balanced sequence first.
+  const balanced = [];
+
+  let pagasaIndex = 0;
+  let phivolcsIndex = 0;
+
+  while (
+    pagasaIndex < pagasaAlerts.length ||
+    phivolcsIndex < phivolcsAlerts.length
+  ) {
+    // Take up to 10 PAGASA alerts.
+    for (let i = 0; i < PAGASA_BATCH_SIZE; i++) {
+      if (pagasaIndex >= pagasaAlerts.length) break;
+
+      balanced.push(pagasaAlerts[pagasaIndex]);
+      pagasaIndex++;
+    }
+
+    // Take up to 10 PHIVOLCS alerts.
+    for (let i = 0; i < PHIVOLCS_BATCH_SIZE; i++) {
+      if (phivolcsIndex >= phivolcsAlerts.length) break;
+
+      balanced.push(phivolcsAlerts[phivolcsIndex]);
+      phivolcsIndex++;
+    }
+  }
+
+  return balanced.slice(startOffset, startOffset + limit);
+}
+
 app.get("/getAlerts", async (req, res) => {
   try {
+    const offset = Math.max(
+      0,
+      Number.parseInt(String(req.query.offset ?? "0"), 10) || 0
+    );
+
+    const limit = 50;
+
     const [pagasaRaw, phivolcsRaw] = await Promise.all([
       fetchPagasaAlerts(),
       fetchPhivolcsAlerts(),
     ]);
 
-    const alerts = [
-      ...pagasaRaw.map(normalizePagasa),
-      ...phivolcsRaw.map(normalizePhivolcs),
-    ];
+    const pagasaAlerts = pagasaRaw
+      .map(normalizePagasa)
+      .sort(
+        (a, b) =>
+          new Date(b.issued_at).getTime() -
+          new Date(a.issued_at).getTime()
+      );
 
-    console.log(`getAlerts returning ${alerts.length} alerts (real data)`);
+    const phivolcsAlerts = phivolcsRaw
+      .map(normalizePhivolcs)
+      .sort(
+        (a, b) =>
+          new Date(b.issued_at).getTime() -
+          new Date(a.issued_at).getTime()
+      );
+
+    // Build a balanced stream:
+    // 10 PAGASA, then 10 PHIVOLCS, repeatedly.
+    const balancedAlerts = [];
+
+    let pagasaIndex = 0;
+    let phivolcsIndex = 0;
+
+    while (
+      balancedAlerts.length < offset + limit &&
+      (pagasaIndex < pagasaAlerts.length ||
+        phivolcsIndex < phivolcsAlerts.length)
+    ) {
+      // Take up to 10 PAGASA alerts.
+      for (
+        let i = 0;
+        i < 10 && pagasaIndex < pagasaAlerts.length;
+        i++
+      ) {
+        balancedAlerts.push(pagasaAlerts[pagasaIndex++]);
+      }
+
+      // Take up to 10 PHIVOLCS alerts.
+      for (
+        let i = 0;
+        i < 10 && phivolcsIndex < phivolcsAlerts.length;
+        i++
+      ) {
+        balancedAlerts.push(phivolcsAlerts[phivolcsIndex++]);
+      }
+    }
+
+    const alerts = balancedAlerts.slice(offset, offset + limit);
+
+    console.log(
+      `getAlerts offset=${offset} returning ${alerts.length} alerts`
+    );
+
     res.status(200).json(alerts);
   } catch (err) {
     console.error("getAlerts failed:", err);
