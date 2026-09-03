@@ -1,5 +1,6 @@
 import * as cheerio from 'cheerio';
 import https from 'https';
+import { createGunzip } from 'zlib';
 
 const PHIVOLCS_URL = 'https://earthquake.phivolcs.dost.gov.ph/';
 
@@ -12,102 +13,170 @@ interface RawPhivolcsRow {
   location: string;
 }
 
-/**
- * Real PHIVOLCS fetch + parse, ported from phivocs-api's fetchEarthquakes.
- * Confirmed against the live page structure during Phase 1: the main
- * catalog table only has date/time, coordinates, depth, origin, magnitude,
- * location -- no intensity data anywhere (see Phase 1 write-up). This
- * scraper only ever needs magnitude, matching the corrected trigger design.
- *
- * SECURITY NOTE, stated plainly rather than buried: this disables TLS
- * certificate verification (rejectUnauthorized: false) for this one host,
- * carried over directly from phivocs-api's original code. That project's
- * author apparently found the fetch fails without it -- likely a
- * certificate configuration issue on PHIVOLCS's server, not something in
- * our control. This is a real trade-off (it means we can't detect a
- * man-in-the-middle attack on this specific request) worth naming
- * explicitly in the paper's methodology/limitations, not quietly inheriting.
- *
- * UNVERIFIED DETAIL: PHIVOLCS's exact date/time text format wasn't
- * directly confirmed during this port. parsePhivolcsDateTime attempts a
- * real parse and falls back to the fetch time (logging a warning) if it
- * fails -- check server logs after first deploy to see which path fired.
- */
 export async function fetchPhivolcsAlertsReal(): Promise<RawPhivolcsRow[]> {
-  const html = await fetchHtml();
-  const $ = cheerio.load(html);
-  const $table = $('table.MsoNormalTable');
+  try {
+    const html = await fetchHtml();
+    console.log('PHIVOLCS HTML length:', html.length);
 
-  if ($table.length === 0) {
-    throw new Error('PHIVOLCS earthquake table not found on page (selector may be stale)');
-  }
+    const $ = cheerio.load(html);
 
-  const rows: RawPhivolcsRow[] = [];
+    // Find all MsoNormalTable tables
+    const allTables = $('table.MsoNormalTable');
+    console.log(`Found ${allTables.length} MsoNormalTable tables on page`);
 
-  $table.find('tr').each((_, row) => {
-    const $row = $(row);
-    const $cols = $row.find('td');
-    if ($cols.length < 6) return;
+    // The earthquake data table is the one with 1000+ rows
+    let $table: any = null;
+    allTables.each((i: number, table: any) => {
+      const $t = $(table);
+      const rows = $t.find('tr').length;
+      console.log(`Table ${i}: ${rows} rows`);
 
-    const $dateLink = $cols.eq(0).find('a');
-    const rawDateTime = $dateLink.length ? $dateLink.text().trim() : $cols.eq(0).text().trim();
-    if (!rawDateTime) return;
-
-    const latitude = parseFloat($cols.eq(1).text().trim());
-    const longitude = parseFloat($cols.eq(2).text().trim());
-    const depth = parseFloat($cols.eq(3).text().trim());
-    const magnitude = parseFloat($cols.eq(4).text().trim());
-    const location = $cols.eq(5).text().replace(/\s+/g, ' ').trim();
-
-    if (!location || Number.isNaN(magnitude)) return;
-
-    rows.push({
-      dateTime: parsePhivolcsDateTime(rawDateTime),
-      latitude: Number.isNaN(latitude) ? 0 : latitude,
-      longitude: Number.isNaN(longitude) ? 0 : longitude,
-      depth: Number.isNaN(depth) ? 0 : depth,
-      magnitude,
-      location,
+      if (rows > 100 && !$table) {
+        console.log(`Using table ${i} with ${rows} rows`);
+        $table = $t;
+      }
     });
-  });
 
-  if (rows.length === 0) {
-    throw new Error('PHIVOLCS table found but zero rows parsed -- selector or column order may have changed');
+    if (!$table || $table.length === 0) {
+      throw new Error('Could not find earthquake data table (1000+ rows)');
+    }
+
+    const rows: RawPhivolcsRow[] = [];
+    let headerSkipped = false;
+
+    $table.find('tr').each((_: number, row: any) => {
+      const $row = $(row);
+      const $cols = $row.find('td');
+
+      if ($cols.length < 6) return;
+
+      // Skip header row
+      if (!headerSkipped && $row.text().includes('enter new event')) {
+        headerSkipped = true;
+        return;
+      }
+
+      const getText = (index: number): string => {
+        const $col = $cols.eq(index);
+        const $spans = $col.find('span');
+        if ($spans.length > 0) {
+          return $spans
+            .map((_, s: any) => $(s).text().trim())
+            .get()
+            .join(' ')
+            .trim();
+        }
+        return $col.text().trim();
+      };
+
+      const rawDateTime = getText(0);
+      const latStr = getText(1);
+      const lngStr = getText(2);
+      const depthStr = getText(3);
+      const magStr = getText(4);
+      const location = getText(5).replace(/\s+/g, ' ');
+
+      const latitude = parseFloat(latStr);
+      const longitude = parseFloat(lngStr);
+      const depth = parseFloat(depthStr);
+      const magnitude = parseFloat(magStr);
+
+      if (!rawDateTime || !location || Number.isNaN(magnitude)) {
+        return;
+      }
+
+      rows.push({
+        dateTime: parsePhivolcsDateTime(rawDateTime),
+        latitude: Number.isNaN(latitude) ? 0 : latitude,
+        longitude: Number.isNaN(longitude) ? 0 : longitude,
+        depth: Number.isNaN(depth) ? 0 : depth,
+        magnitude,
+        location,
+      });
+    });
+
+    if (rows.length === 0) {
+      throw new Error('Parsed earthquake table but found zero rows');
+    }
+
+    console.log(`PHIVOLCS: Parsed ${rows.length} earthquakes`);
+    return rows;
+  } catch (error) {
+    console.error('PHIVOLCS parsing failed:', error);
+    throw error;
   }
-
-  return rows;
 }
 
 function parsePhivolcsDateTime(raw: string): string {
-  const parsed = new Date(raw.replace(' - ', ' '));
-  if (!Number.isNaN(parsed.getTime())) {
-    return parsed.toISOString();
+  // PHIVOLCS may duplicate the date/time text:
+  // "01 August 2026 - 01:22 AM 01 August 2026 - 01:22 AM"
+  const cleaned = raw.trim();
+
+  // Extract the first complete PHIVOLCS date/time occurrence.
+  const match = cleaned.match(
+    /(\d{1,2}\s+[A-Za-z]+\s+\d{4})\s*-\s*(\d{1,2}:\d{2}\s*[AP]M)/i
+  );
+
+  if (match) {
+    const datePart = match[1];
+    const timePart = match[2];
+
+    const parsed = new Date(`${datePart} ${timePart}`);
+
+    if (!Number.isNaN(parsed.getTime())) {
+      return parsed.toISOString();
+    }
   }
-  console.warn(`PHIVOLCS date "${raw}" did not parse cleanly -- using fetch time as fallback`);
+
+  console.warn(
+    `PHIVOLCS date "${raw}" could not be parsed -- using fetch time as fallback`,
+  );
+
   return new Date().toISOString();
 }
 
 function fetchHtml(): Promise<string> {
-  return new Promise((resolve, reject) => {
+  return new Promise<string>((resolve, reject) => {
     const req = https.get(
       PHIVOLCS_URL,
       {
-        headers: { 'User-Agent': 'DisasterAlertApp-SchoolResearchProject/0.1' },
+        headers: {
+          'User-Agent': 'ASPER-Alert/1.0 (SchoolResearchProject)',
+          'Accept-Encoding': 'gzip, deflate',
+        },
         rejectUnauthorized: false,
         timeout: 30_000,
       },
-      (res) => {
+      (res: any) => {
         if (res.statusCode && res.statusCode >= 400) {
           reject(new Error(`PHIVOLCS fetch failed: HTTP ${res.statusCode}`));
           return;
         }
+
         let data = '';
-        res.on('data', (chunk) => (data += chunk));
-        res.on('end', () => resolve(data));
-        res.on('error', reject);
+        let stream: any = res;
+
+        // If response is gzipped, decompress it
+        if (res.headers['content-encoding'] === 'gzip') {
+          console.log('Response is gzip-encoded, decompressing...');
+          stream = res.pipe(createGunzip());
+        }
+
+        stream.on('data', (chunk: Buffer) => {
+          data += chunk.toString();
+        });
+
+        stream.on('end', () => {
+          resolve(data);
+        });
+
+        stream.on('error', reject);
       },
     );
+
     req.on('error', reject);
-    req.on('timeout', () => req.destroy(new Error('PHIVOLCS fetch timed out')));
+    req.on('timeout', () => {
+      req.destroy(new Error('PHIVOLCS fetch timed out'));
+    });
   });
 }
