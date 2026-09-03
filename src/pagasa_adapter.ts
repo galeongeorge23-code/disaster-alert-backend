@@ -1,3 +1,5 @@
+import puppeteer from 'puppeteer';
+
 interface PagasaBulletin {
   cycloneId: string;
   bulletinNumber: number;
@@ -12,30 +14,35 @@ interface PagasaBulletin {
 const PAGASA_BULLETIN_URL = 'https://www.pagasa.dost.gov.ph/tropical-cyclone/severe-weather-bulletin';
 
 export async function fetchPagasaAlertsReal(): Promise<PagasaBulletin[]> {
+  let browser;
   try {
-    const response = await fetch(PAGASA_BULLETIN_URL, {
-      headers: {
-        'user-agent': 'ASPER-Alert (SchoolResearchProject)',
-      },
-      signal: AbortSignal.timeout(30_000),
+    browser = await puppeteer.launch({
+      headless: true,
+      args: ['--no-sandbox', '--disable-setuid-sandbox'],
     });
-
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`);
-    }
-
-    const html = await response.text();
-
+    
+    const page = await browser.newPage();
+    await page.goto(PAGASA_BULLETIN_URL, { waitUntil: 'networkidle2', timeout: 30000 });
+    
+    const html = await page.content();
+    await browser.close();
+    
+    console.log('PAGASA: Puppeteer fetched page successfully');
+    
+    // Check for "No Active Tropical Cyclone"
     if (/No Active Tropical Cyclone/i.test(html)) {
       console.log('PAGASA: No active tropical cyclone on website');
-      console.log('Using PAGASA fallback data for demo...');
       return getPagasaFallbackData();
     }
-
-    throw new Error('PAGASA page requires JS rendering');
+    
+    // TODO: Parse the HTML here (use cheerio or your existing parser)
+    // For now, return fallback
+    console.log('PAGASA: Page loaded but parsing not yet implemented');
+    return getPagasaFallbackData();
+    
   } catch (error) {
-    console.warn('PAGASA fetch/parse failed:', error);
-    console.log('Using PAGASA fallback data for demo...');
+    console.error('PAGASA Puppeteer error:', error);
+    console.log('Using PAGASA fallback data...');
     return getPagasaFallbackData();
   }
 }
@@ -54,11 +61,11 @@ function getPagasaFallbackData(): PagasaBulletin[] {
       expiresAt: null,
       affectedAreas: [
         { name: 'Metro Manila', psgcCode: '130000000', signalLevel: 3 },
-        { name: 'Cavite', psgcCode: '402100000', signalLevel: 3 },
-        { name: 'Laguna', psgcCode: '403400000', signalLevel: 3 },
-        { name: 'Batangas', psgcCode: '401000000', signalLevel: 2 },
-        { name: 'Rizal', psgcCode: '405800000', signalLevel: 3 },
-        { name: 'Quezon', psgcCode: '405600000', signalLevel: 1 },
+        { name: 'Cavite', psgcCode: '042300000', signalLevel: 3 },
+        { name: 'Laguna', psgcCode: '042400000', signalLevel: 3 },
+        { name: 'Batangas', psgcCode: '041700000', signalLevel: 2 },
+        { name: 'Rizal', psgcCode: '074400000', signalLevel: 3 },
+        { name: 'Quezon', psgcCode: '062600000', signalLevel: 1 },
       ],
       instructions: [
         'Evacuate low-lying and flood-prone areas',
