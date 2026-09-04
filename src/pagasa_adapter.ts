@@ -19,6 +19,7 @@ export async function fetchPagasaAlertsReal(): Promise<PagasaBulletin[]> {
     console.log("PAGASA: ENTERING PUPPETEER");
     browser = await puppeteer.launch({
       headless: true,
+      executablePath: process.env.PUPPETEER_EXECUTABLE_PATH,
       args: ['--no-sandbox', '--disable-setuid-sandbox'],
     });
     console.log("PAGASA: CHROME LAUNCHED");
