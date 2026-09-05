@@ -16,10 +16,8 @@ const PAGASA_BULLETIN_URL = 'https://www.pagasa.dost.gov.ph/tropical-cyclone/sev
 export async function fetchPagasaAlertsReal(): Promise<PagasaBulletin[]> {
   let browser;
   try {
-    console.log(
-      "PAGASA: EXECUTABLE PATH =",
-      process.env.PUPPETEER_EXECUTABLE_PATH
-    );
+    console.log("PAGASA: ENTERING PUPPETEER");
+
     console.log(
       "PAGASA: Puppeteer cache directory =",
       puppeteer.configuration().cacheDirectory
@@ -29,13 +27,21 @@ export async function fetchPagasaAlertsReal(): Promise<PagasaBulletin[]> {
       headless: true,
       args: ['--no-sandbox', '--disable-setuid-sandbox'],
     });
+
+    console.log("PAGASA: CHROME LAUNCHED");
+
     const page = await browser.newPage();
     await page.goto(PAGASA_BULLETIN_URL, { waitUntil: 'networkidle2', timeout: 30000 });
     
     const html = await page.content();
-    await browser.close();
-    
+
     console.log('PAGASA: Puppeteer fetched page successfully');
+    console.log(`PAGASA: HTML length = ${html.length}`);
+    console.log(`PAGASA: Page title = ${await page.title()}`);
+    console.log(
+      `PAGASA: No Active Tropical Cyclone match = ${/No Active Tropical Cyclone/i.test(html)}`
+    );
+    await browser.close();
     
     // Check for "No Active Tropical Cyclone"
     if (/No Active Tropical Cyclone/i.test(html)) {
