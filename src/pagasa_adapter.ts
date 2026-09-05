@@ -16,11 +16,19 @@ const PAGASA_BULLETIN_URL = 'https://www.pagasa.dost.gov.ph/tropical-cyclone/sev
 export async function fetchPagasaAlertsReal(): Promise<PagasaBulletin[]> {
   let browser;
   try {
+    console.log(
+      "PAGASA: EXECUTABLE PATH =",
+      process.env.PUPPETEER_EXECUTABLE_PATH
+    );
+    console.log(
+      "PAGASA: Puppeteer cache directory =",
+      puppeteer.configuration().cacheDirectory
+    );
+
     browser = await puppeteer.launch({
       headless: true,
       args: ['--no-sandbox', '--disable-setuid-sandbox'],
     });
-    
     const page = await browser.newPage();
     await page.goto(PAGASA_BULLETIN_URL, { waitUntil: 'networkidle2', timeout: 30000 });
     
