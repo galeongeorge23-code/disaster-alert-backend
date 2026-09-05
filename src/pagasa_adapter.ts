@@ -13,15 +13,22 @@ interface PagasaBulletin {
 
 const PAGASA_BULLETIN_URL = 'https://www.pagasa.dost.gov.ph/tropical-cyclone/severe-weather-bulletin';
 
-export async function fetchPagasaAlertsReal(): Promise<PagasaBulletin[]> {
+  export async function fetchPagasaAlertsReal(): Promise<PagasaBulletin[]> {
   let browser;
   try {
     console.log("PAGASA: ENTERING PUPPETEER");
+
+    console.log(
+      "PAGASA: EXECUTABLE PATH =",
+      process.env.PUPPETEER_EXECUTABLE_PATH
+    );
+
     browser = await puppeteer.launch({
       headless: true,
       executablePath: process.env.PUPPETEER_EXECUTABLE_PATH,
       args: ['--no-sandbox', '--disable-setuid-sandbox'],
     });
+
     console.log("PAGASA: CHROME LAUNCHED");
     
     const page = await browser.newPage();
