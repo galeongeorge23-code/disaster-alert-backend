@@ -13,31 +13,30 @@ interface PagasaBulletin {
 
 const PAGASA_BULLETIN_URL = 'https://www.pagasa.dost.gov.ph/tropical-cyclone/severe-weather-bulletin';
 
-  export async function fetchPagasaAlertsReal(): Promise<PagasaBulletin[]> {
+export async function fetchPagasaAlertsReal(): Promise<PagasaBulletin[]> {
   let browser;
   try {
     console.log("PAGASA: ENTERING PUPPETEER");
 
     console.log(
-      "PAGASA: EXECUTABLE PATH =",
-      process.env.PUPPETEER_EXECUTABLE_PATH
+      "PAGASA: Puppeteer cache directory =",
+      puppeteer.configuration().cacheDirectory
     );
 
     browser = await puppeteer.launch({
       headless: true,
-      executablePath: process.env.PUPPETEER_EXECUTABLE_PATH,
       args: ['--no-sandbox', '--disable-setuid-sandbox'],
     });
 
     console.log("PAGASA: CHROME LAUNCHED");
-    
+
     const page = await browser.newPage();
     await page.goto(PAGASA_BULLETIN_URL, { waitUntil: 'networkidle2', timeout: 30000 });
     
     const html = await page.content();
 
     console.log('PAGASA: Puppeteer fetched page successfully');
-    console.log(`PAGASA: HTML le  ngth = ${html.length}`);
+    console.log(`PAGASA: HTML length = ${html.length}`);
     console.log(`PAGASA: Page title = ${await page.title()}`);
     console.log(
       `PAGASA: No Active Tropical Cyclone match = ${/No Active Tropical Cyclone/i.test(html)}`
