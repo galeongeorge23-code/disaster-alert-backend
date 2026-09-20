@@ -7,19 +7,25 @@ interface PagasaBulletin {
   category: string;
   issuedAt: string;
   expiresAt: string | null;
-  affectedAreas: Array<{ name: string; psgcCode: string | null; signalLevel: number }>;
+  affectedAreas: Array<{
+    name: string;
+    psgcCode: string | null;
+    signalLevel: number;
+  }>;
   instructions: string[];
 }
 
-const PAGASA_BULLETIN_URL = 'https://www.pagasa.dost.gov.ph/tropical-cyclone/severe-weather-bulletin';
+const PAGASA_BULLETIN_URL =
+  'https://www.pagasa.dost.gov.ph/tropical-cyclone/severe-weather-bulletin';
 
 export async function fetchPagasaAlertsReal(): Promise<PagasaBulletin[]> {
   let browser;
+
   try {
-    console.log("PAGASA: ENTERING PUPPETEER");
+    console.log('PAGASA: ENTERING PUPPETEER');
 
     console.log(
-      "PAGASA: Puppeteer cache directory =",
+      'PAGASA: Puppeteer cache directory =',
       puppeteer.configuration().cacheDirectory
     );
 
@@ -28,35 +34,52 @@ export async function fetchPagasaAlertsReal(): Promise<PagasaBulletin[]> {
       args: ['--no-sandbox', '--disable-setuid-sandbox'],
     });
 
-    console.log("PAGASA: CHROME LAUNCHED");
+    console.log('PAGASA: CHROME LAUNCHED');
 
     const page = await browser.newPage();
-    await page.goto(PAGASA_BULLETIN_URL, { waitUntil: 'networkidle2', timeout: 30000 });
-    
+
+    await page.goto(PAGASA_BULLETIN_URL, {
+      waitUntil: 'networkidle2',
+      timeout: 30000,
+    });
+
     const html = await page.content();
 
     console.log('PAGASA: Puppeteer fetched page successfully');
     console.log(`PAGASA: HTML length = ${html.length}`);
     console.log(`PAGASA: Page title = ${await page.title()}`);
     console.log(
-      `PAGASA: No Active Tropical Cyclone match = ${/No Active Tropical Cyclone/i.test(html)}`
+      `PAGASA: No Active Tropical Cyclone match = ${/No Active Tropical Cyclone/i.test(
+        html
+      )}`
     );
+
     await browser.close();
-    
-    // Check for "No Active Tropical Cyclone"
+    browser = undefined;
+
     if (/No Active Tropical Cyclone/i.test(html)) {
       console.log('PAGASA: No active tropical cyclone on website');
       return getPagasaFallbackData();
     }
-    
-    // TODO: Parse the HTML here (use cheerio or your existing parser)
-    // For now, return fallback
+
+    // TODO: Parse the HTML here.
+    // For now, return fallback data until live bulletin
+    // extraction has been implemented and validated.
     console.log('PAGASA: Page loaded but parsing not yet implemented');
+
     return getPagasaFallbackData();
-    
   } catch (error) {
     console.error('PAGASA Puppeteer error:', error);
     console.log('Using PAGASA fallback data...');
+
+    if (browser) {
+      try {
+        await browser.close();
+      } catch {
+        // Ignore browser-close errors during fallback handling.
+      }
+    }
+
     return getPagasaFallbackData();
   }
 }
@@ -74,12 +97,36 @@ function getPagasaFallbackData(): PagasaBulletin[] {
       issuedAt: issuedAt.toISOString(),
       expiresAt: null,
       affectedAreas: [
-        { name: 'Metro Manila', psgcCode: '130000000', signalLevel: 3 },
-        { name: 'Cavite', psgcCode: '042300000', signalLevel: 3 },
-        { name: 'Laguna', psgcCode: '042400000', signalLevel: 3 },
-        { name: 'Batangas', psgcCode: '041700000', signalLevel: 2 },
-        { name: 'Rizal', psgcCode: '074400000', signalLevel: 3 },
-        { name: 'Quezon', psgcCode: '062600000', signalLevel: 1 },
+        {
+          name: 'Metro Manila',
+          psgcCode: '130000000',
+          signalLevel: 3,
+        },
+        {
+          name: 'Cavite',
+          psgcCode: '042300000',
+          signalLevel: 3,
+        },
+        {
+          name: 'Laguna',
+          psgcCode: '042400000',
+          signalLevel: 3,
+        },
+        {
+          name: 'Batangas',
+          psgcCode: '041700000',
+          signalLevel: 2,
+        },
+        {
+          name: 'Rizal',
+          psgcCode: '074400000',
+          signalLevel: 3,
+        },
+        {
+          name: 'Quezon',
+          psgcCode: '062600000',
+          signalLevel: 1,
+        },
       ],
       instructions: [
         'Evacuate low-lying and flood-prone areas',
