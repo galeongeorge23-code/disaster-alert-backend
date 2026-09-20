@@ -22,7 +22,7 @@ function normalizePagasa(raw) {
   const areas = raw.affectedAreas.map((a) => ({
     area_name: a.name,
     psgc_code: a.psgcCode,
-    h3_index: resolvePsgcToH3(a.psgcCode).h3_cells,s
+    h3_index: resolvePsgcToH3(a.psgcCode).h3_cells,
     signal_level: a.signalLevel,
     peis: null,
   }));
